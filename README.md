@@ -208,6 +208,7 @@ Medidas do pipeline, **não** da peça física:
 | Acerto pixel a pixel, modelo × imagem | 90,5 % na mama (ImageJ) e 90,6 % (Python) |
 | Variação do relevo preservada no STL | 86,9 % (volume retido 90,6 %) |
 | Maiores perdas na cadeia | suavização 5,5 % e limpeza de manufatura 4,4 % |
+| Configuração para Ender 3 ([docs/ENDER3.md](docs/ENDER3.md)) | variação preservada 90,6 %, acerto 91,8 % (Python), 14 placas × 3,4 mm, 91 peças; com margem de 3 mm na borda da imagem (artefato de borda removido) |
 
 O acerto usa o **mesmo critério** (limiar de Otsu) que gera as placas; mede a perda na
 conversão, não a fidelidade física.

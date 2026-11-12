@@ -103,6 +103,70 @@ def orientar(img: np.ndarray, mask: np.ndarray):
     return img, mask, False
 
 
+def remover_peitoral(img: np.ndarray, mask: np.ndarray, voxel_mm: float, margem_mm: float = 2.0):
+    """MLO: devolve a máscara do músculo peitoral (para excluir da mama).
+
+    Na MLO o peitoral é um triângulo muito claro no canto superior, junto à parede
+    torácica (imagem já orientada, parede à esquerda). Sem removê-lo, o gerador
+    imprimiria o músculo como se fosse tecido fibroglandular.
+    Método: (1) região clara (> percentil 80 da mama, suavizada) ligada ao canto
+    superior esquerdo; (2) sua borda direita, linha a linha, vira uma reta por
+    mínimos quadrados aparados (a fronteira do peitoral é quase reta); (3) tudo à esquerda
+    da reta, mais `margem_mm`, é peitoral. Heurístico: conferir o resultado na imagem."""
+    h, w = img.shape
+    s = ndi.gaussian_filter(img, 2.0 / voxel_mm)
+    alto = (s > np.percentile(s[mask], 80)) & mask
+    lab, _ = ndi.label(alto)
+    semente = lab[: max(1, int(0.08 * h)), : max(1, int(0.25 * w))]
+    if not (semente > 0).any():
+        return np.zeros_like(mask)
+    alvo = lab == np.bincount(semente[semente > 0]).argmax()
+    ys = np.where(alvo.any(1))[0]
+    if len(ys) < 10:
+        return np.zeros_like(mask)
+    xs = np.array([np.where(alvo[y])[0].max() for y in ys], dtype=float)
+    keep = np.ones(len(ys), bool)
+    for _ in range(3):  # mínimos quadrados aparados: descarta os 20 % piores
+        a, b = np.polyfit(ys[keep], xs[keep], 1)
+        res = np.abs(xs - (a * ys + b))
+        keep = res <= np.percentile(res[keep], 80)
+    Y, X = np.mgrid[0:h, 0:w]
+    reta = a * Y + b + margem_mm / voxel_mm
+    peit = (X <= reta) & mask & (a < 0)  # inclinação negativa = triângulo no canto superior
+    # mantém só o que está ligado ao canto (descarta pontas soltas)
+    lab2, _ = ndi.label(peit)
+    c = lab2[: max(1, int(0.08 * h)), : max(1, int(0.25 * w))]
+    return lab2 == np.bincount(c[c > 0]).argmax() if (c > 0).any() else np.zeros_like(mask)
+
+
+def cortar_abdome(mask: np.ndarray, voxel_mm: float):
+    """MLO: corta a faixa de tronco/abdome que a máscara inclui abaixo do sulco inframamário.
+
+    Com a parede torácica à esquerda, o contorno inferior da mama sobe a partir do sulco;
+    a faixa de tronco continua colada à borda esquerda até o fim da imagem. Acha a primeira
+    coluna (da parede para fora) em que a máscara deixa de chegar à base da imagem e corta,
+    nas colunas anteriores, tudo abaixo do contorno inferior dessa coluna.
+    Devolve a máscara do que foi cortado."""
+    h, w = mask.shape
+    base = np.array([np.where(mask[:, x])[0].max() if mask[:, x].any() else -1 for x in range(w)])
+    if base[0] < 0:
+        return np.zeros_like(mask)
+    # contorno inferior da mama de referência: mediana do fundo da máscara entre 15 e 30 mm da
+    # parede (já fora da faixa de tronco). Colunas mais perto da parede que ainda descem mais
+    # de 10 mm além dessa referência são tronco: corta abaixo da referência.
+    x1, x2 = int(round(15 / voxel_mm)), int(round(30 / voxel_mm))
+    if x2 >= w:
+        return np.zeros_like(mask)
+    ref = int(np.median(base[x1:x2]))
+    excesso = np.where(base[:x1] > ref + int(round(10 / voxel_mm)))[0]
+    if len(excesso) == 0:
+        return np.zeros_like(mask)
+    xf = int(excesso.max()) + 1
+    corte = np.zeros_like(mask)
+    corte[ref + int(round(2 / voxel_mm)):, :xf + int(round(2 / voxel_mm))] = True
+    return corte & mask
+
+
 def intensidade_normalizada(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Proxy de densidade em [0,1] dentro da mama (percentis 1–99).
     Não é densidade calibrada: para isso seria preciso imagem FOR PROCESSING e o
@@ -279,7 +343,7 @@ def malha_relevo(campo: np.ndarray, mask: np.ndarray, voxel_mm: float,
 # d quantizado em passos de e. Placas planas imprimem deitadas, sem suporte.
 
 def mapa_fibroso(img: np.ndarray, mask: np.ndarray, voxel_mm: float, margem_pele_mm: float,
-                 fator_zero: float = 1.0):
+                 fator_zero: float = 1.0, suavizacao_mm: float = 0.75, margem_borda_mm: float = 3.0):
     """Fração fibroglandular pf(x,y) ∈ [0,1]; gordura → 0 (não é impressa).
 
     Dentro da mama, o Otsu separa as duas populações (adiposo × fibroglandular); esse
@@ -293,18 +357,30 @@ def mapa_fibroso(img: np.ndarray, mask: np.ndarray, voxel_mm: float, margem_pele
     zero = piso + (float(filters.threshold_otsu(v)) - piso) * fator_zero
     pf = np.clip((img - zero) / (um - zero + 1e-9), 0, 1)
     pf[~mask] = 0
+    # Borda da imagem: o filtro/borda do detector deixa uma faixa clara de ~2–3 mm que não
+    # é tecido (cinza 98 contra 32 ao lado, medido no lcc1). Ela virava lascas de placa
+    # coladas ao limite da imagem, fora do contorno real da mama.
+    kb = int(round(margem_borda_mm / voxel_mm))
+    borda = np.zeros_like(mask, dtype=bool)
+    if kb > 0:
+        borda[:, :kb] = borda[:, -kb:] = borda[:kb, :] = borda[-kb:, :] = True
+    pf[borda] = 0
     pf_bruto = pf.copy()  # conversão cinza → fração, antes de faixa da pele e suavização
     if margem_pele_mm > 0:
         pf[ndi.distance_transform_edt(mask) * voxel_mm < margem_pele_mm] = 0
-    pf = ndi.gaussian_filter(pf, 0.75 / voxel_mm)  # ~0.75 mm: tira ruído sem apagar os feixes
+    if suavizacao_mm > 0:
+        pf = ndi.gaussian_filter(pf, suavizacao_mm / voxel_mm)  # tira ruído sem apagar os feixes
     pf[~mask] = 0
+    pf[borda] = 0  # a suavização não pode devolver tecido à faixa da borda
     return pf, zero, um, piso, pf_bruto
 
 
 def limpar_regiao(R: np.ndarray, voxel_mm: float, traco_min_mm: float, area_min_mm2: float):
     """Remove o que a impressora não reproduz ou não dá para manusear: traços mais
     finos que `traco_min_mm`, ilhas menores que `area_min_mm2` e furos < 4 mm²."""
-    r = int(round(traco_min_mm / 2 / voxel_mm))
+    # disk(r) tem largura 2r+1 pixels; a abertura remove traços mais estreitos que isso.
+    # (antes: r = round(traco/2/voxel), que superestimava a largura removida em voxels grossos)
+    r = int(round((traco_min_mm / voxel_mm - 1) / 2))
     if r >= 1:
         R = ndi.binary_opening(R, morphology.disk(r))
     lab, n = ndi.label(R)
@@ -376,7 +452,8 @@ def processar_placas(a, info: dict, pasta: str, nome: str, img, mask, t, H: floa
     os.makedirs(os.path.join(pasta, "placas"), exist_ok=True)
     v = a.voxel
     s = a.escala_impressao  # fator linear do protótipo (1 = tamanho real)
-    pf, zero, um, piso, pf_bruto = mapa_fibroso(img, mask, v, a.margem_pele, a.limiar_fibroso)
+    pf, zero, um, piso, pf_bruto = mapa_fibroso(img, mask, v, a.margem_pele, a.limiar_fibroso, a.suavizacao,
+                                                a.margem_borda)
 
     # espessura de material denso por pixel (mm)
     d = pf * t
@@ -394,11 +471,17 @@ def processar_placas(a, info: dict, pasta: str, nome: str, img, mask, t, H: floa
     d_ref = np.minimum(k * pf_bruto * t, t) * a.fator_material  # relevo "ideal", sem perdas
 
     # número de placas
-    e = a.espessura_placa
-    n = int(np.ceil((d.max() - 0.5 * e) / e)) if d.max() > 0.5 * e else 0
+    def _n(esp):
+        return int(np.ceil((d.max() - 0.5 * esp) / esp)) if d.max() > 0.5 * esp else 0
+
+    def _camada(esp):  # fatiador: a placa vira nº inteiro de camadas (arredonda p/ cima)
+        return float(np.ceil(esp / a.camada - 1e-9) * a.camada) if a.camada > 0 else esp
+
+    e = _camada(a.espessura_placa)
+    n = _n(e)
     if n > a.max_placas:
-        e = float(d.max() / (a.max_placas + 0.5))
-        n = a.max_placas
+        e = _camada(float(d.max() / (a.max_placas + 0.5)))
+        n = _n(e)
         info["aviso_placas"] = f"espessura da placa aumentada para {e:.2f} mm para caber em {n} placas"
     if n == 0:
         raise RuntimeError("Nenhum tecido denso acima de meia placa; reduza --espessura-placa.")
@@ -422,8 +505,18 @@ def processar_placas(a, info: dict, pasta: str, nome: str, img, mask, t, H: floa
     cmap = plt.get_cmap("magma")
     cena = trimesh.Scene()
     tabela, ok, vol_total, ext_max, pecas_total = [], True, 0.0, np.zeros(3), 0
+    fora_n, x_min, mask_d = 0, np.inf, ndi.binary_dilation(mask)  # tolerância de 1 voxel
+    H_px, W_px = mask.shape
     for i, R in enumerate(regioes, 1):
         m = reduzir(malha_placa(R, mask, v, e, a.base_placa), a.max_faces)
+        # verificação: nenhum vértice de placa pode cair fora do contorno da mama
+        cols = np.round(m.vertices[:, 0] / v).astype(int)
+        lins = np.round(-m.vertices[:, 1] / v).astype(int)
+        dentro_img = (cols >= 0) & (cols < W_px) & (lins >= 0) & (lins < H_px)
+        ok_v = dentro_img.copy()
+        ok_v[dentro_img] = mask_d[lins[dentro_img], cols[dentro_img]]
+        fora_n += int((~ok_v).sum())
+        x_min = min(x_min, float(m.vertices[:, 0].min()))
         if s != 1.0:
             m.apply_scale(s)
         m.export(os.path.join(pasta, "placas", f"placa_{i:02d}.stl"))
@@ -481,6 +574,8 @@ def processar_placas(a, info: dict, pasta: str, nome: str, img, mask, t, H: floa
     altura_pilha = n * (e + a.base_placa) * s
     info |= {
         "escala_impressao": s, "traco_min_impresso_mm": a.traco_min, "area_min_impressa_mm2": a.area_min,
+        "margem_borda_mm": a.margem_borda, "vertices_das_placas_fora_da_mama": fora_n,
+        "x_min_das_placas_mm": round(x_min, 2),
         "limiar_gordura_glandula": zero, "nivel_100pct": um, "margem_pele_mm": a.margem_pele,
         "fracao_glandular_bruta": round(fracao_bruta, 3),
         "fracao_glandular_final": round(float((d / a.fator_material).sum() / t.sum()), 3),
@@ -682,6 +777,18 @@ def processar(arq: str, a) -> dict:
         info["convertida_para_atenuacao"] = transmissao
         mask = segmentar_mama(img, a.limiar)
         img, mask, espelhou = orientar(img, mask)
+        mlo = {"sim": True, "nao": False}.get(a.peitoral, m.meta["Vista"] == "MLO" or "mlo" in nome.lower())
+        if mlo:
+            peit = remover_peitoral(img, mask, a.voxel)
+            mask = mask & ~peit
+            abd = cortar_abdome(mask, a.voxel)
+            mask = mask & ~abd
+            info["abdome_cortado_cm2"] = round(float(abd.sum() * a.voxel**2 / 100), 1)
+            lab_m, _n = ndi.label(mask)
+            if _n > 1:  # sobras desconectadas depois do corte
+                mask = lab_m == (np.argmax(np.bincount(lab_m.ravel())[1:]) + 1)
+            info["peitoral_removido_cm2"] = round(float(peit.sum() * a.voxel**2 / 100), 1)
+            info["mlo"] = True
         p = intensidade_normalizada(img, mask)
 
         H = a.espessura or m.espessura_mm
@@ -774,10 +881,19 @@ def main():
                    help="limite de placas; se exceder, a espessura aumenta (padrão 15)")
     g.add_argument("--fracao-alvo", dest="fracao_alvo", type=float,
                    help="reescala para esta fração glandular volumétrica (ex.: 0.20)")
+    g.add_argument("--peitoral", choices=["auto", "sim", "nao"], default="auto",
+                   help="remove o músculo peitoral (MLO): auto detecta por vista/nome do arquivo")
+    g.add_argument("--margem-borda", dest="margem_borda", type=float, default=3.0,
+                   help="faixa junto à borda da imagem sem placa, em mm (artefato de borda; padrão 3)")
+    g.add_argument("--camada", type=float, default=0.0,
+                   help="altura de camada do fatiador em mm (ex.: 0.2): a espessura da placa vira múltiplo dela")
+    g.add_argument("--suavizacao", type=float, default=0.75,
+                   help="desvio-padrão da suavização do relevo, em mm (padrão 0.75; menor = mais detalhe e mais ruído)")
     g.add_argument("--limiar-fibroso", dest="limiar_fibroso", type=float, default=1.0,
                    help="ajusta o corte gordura×fibroso: <1 inclui feixes mais tênues, >1 só o mais denso")
     g.add_argument("--fator-material", dest="fator_material", type=float, default=1.0,
-                   help="mm de material impresso por mm de tecido glandular (μ_glandular/μ_material; padrão 1)")
+                   help="mm de placa por mm de tecido glandular: (μ_glandular − μ_gordura)/(μ_placa − μ_parafina). "
+                        "Padrão 1 (não calibrado); ver docs/CALIBRACAO_RADIOGRAFICA.md")
     g.add_argument("--margem-pele", dest="margem_pele", type=float, default=5.0,
                    help="faixa junto à pele sem tecido denso, em mm (padrão 5)")
     g.add_argument("--traco-min", dest="traco_min", type=float, default=1.2,

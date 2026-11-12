@@ -63,7 +63,7 @@ Parâmetros principais:
   13,7–25,6 % em média, Yaffe et al., 2009).
 - `--limiar-fibroso 0.8`: inclui feixes fibrosos mais tênues (`>1` deixa só o mais denso).
 - `--base-placa 0.6`: lâmina que une as ilhas de cada placa numa peça só.
-- `--fator-material`: mm de material por mm de tecido glandular (μ_glandular/μ_material).
+- `--fator-material`: mm de placa por mm de tecido glandular, ou seja (μ_glandular − μ_gordura)/(μ_placa − μ_parafina); ver [CALIBRACAO_RADIOGRAFICA.md](CALIBRACAO_RADIOGRAFICA.md).
 - `--margem-pele`, `--traco-min`, `--area-min`, `--parede`, `--fundo`, `--folga`.
 
 **Limitações:** em imagem "FOR PRESENTATION" a escala de cinza não é física; o corte
@@ -199,3 +199,20 @@ menos de 0,03 %.
 .venv\Scripts\python tests\gerar_sintetico.py tmp_sint
 .venv\Scripts\python src\mama3d.py tmp_sint
 ```
+
+- `--camada 0.2`: a espessura da placa vira múltiplo da altura de camada do fatiador (3,4 mm = 17 camadas).
+- `--suavizacao 0.4`: desvio-padrão da suavização do relevo, em mm (padrão 0,75; menor = mais detalhe e mais ruído).
+- Configuração para Ender 3 e comparação de parâmetros: [ENDER3.md](ENDER3.md).
+
+## Imagens MLO (peitoral e abdome)
+Na MLO, o músculo peitoral (triângulo claro no canto superior) e a faixa de tronco abaixo do sulco
+inframamário entram na máscara da mama. Sem tratamento, o peitoral seria impresso como tecido
+fibroglandular. Por isso, para arquivos MLO (vista do DICOM ou `mlo` no nome), o gerador:
+- remove o peitoral (região clara ligada ao canto, borda aproximada por uma reta; `info.json → peitoral_removido_cm2`);
+- corta o tronco abaixo do contorno inferior da mama (`abdome_cortado_cm2`);
+- `--peitoral sim|nao|auto` força ou desliga isso (padrão auto).
+É heurístico: confira a sobreposição das placas na imagem. O G-code gira a placa no plano da mesa
+(`--rotacao auto`) quando ela não cabe em 220 × 220 mm com o brim.
+
+**Pixel das imagens de 2457 × 1996:** a proporção é a mesma das de 3328 × 4096 (campo de 24 × 29 cm),
+com 60 % da resolução; por isso foi usado 0,1167 mm (0,07 / 0,6). É inferência, não medida.

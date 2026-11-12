@@ -128,6 +128,12 @@ def main():
     lab, n = ndi.label(mask)
     if n > 1:
         mask = lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
+    npz = os.path.join(a.pasta, "intermediarios.npz")
+    if os.path.exists(npz):  # usa a MESMA máscara do gerador (MLO: sem peitoral nem abdome)
+        mk = np.load(npz)["mask"]
+        mk = mk[:, ::-1] if info.get("espelhado") else mk
+        if mk.shape == mask.shape:
+            mask = mk
     margem_px = int(round(info.get("margem_pele_mm", 0) / v))
     interior = ndi.distance_transform_edt(mask) > margem_px if margem_px else mask
     res = {"fonte_do_modelo": "STL das placas" if a.stl else "GLB embutido no visualizar.html",
