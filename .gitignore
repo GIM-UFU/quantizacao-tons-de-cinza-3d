@@ -1,0 +1,21 @@
+# ambiente e caches
+.venv/
+__pycache__/
+*.pyc
+
+# saídas geradas (reproduzíveis com src/mama3d.py)
+saida/
+
+# imagens de pacientes/exames: não versionar
+dados/
+
+# artigos: direitos de terceiros (só Bliznakova 2024 é CC BY); ver Literatura/LEIAME.md
+Literatura/*.pdf
+
+# código/binários de terceiros: baixar conforme externo/LEIAME.md
+externo/*
+!externo/LEIAME.md
+
+# temporários
+tmp_*/
+*.log

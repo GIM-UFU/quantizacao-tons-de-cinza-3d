@@ -1,0 +1,15 @@
+numpy
+scipy
+pillow
+pydicom
+pylibjpeg
+pylibjpeg-openjpeg
+pylibjpeg-libjpeg
+tifffile
+imagecodecs
+scikit-image
+trimesh
+fast_simplification
+lxml
+networkx
+matplotlib
