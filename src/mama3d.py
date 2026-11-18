@@ -545,7 +545,9 @@ def processar_placas(a, info: dict, pasta: str, nome: str, img, mask, t, H: floa
         rec.apply_scale(s)
     rec.export(os.path.join(pasta, "recipiente.stl"))
     cav_cm3 = area_cav * H * s**3 / 1000
-    casca = reduzir(malha_solida(mapa_espessura(mask_c, H, vc), mask_c, vc), 30000)
+    # contorno do tecido adiposo no visualizador: prisma de parede reta (igual ao recipiente impresso). O perfil
+    # semicircular de mapa_espessura() afinava a casca perto da pele e as placas, empilhadas na vertical, "vazavam"
+    casca = reduzir(malha_solida(np.where(mask_c, float(H), 0.0), mask_c, vc), 30000)
     if s != 1.0:
         casca.apply_scale(s)
     casca.visual.face_colors = cor_parte("adiposo", 2)
@@ -581,6 +583,7 @@ def processar_placas(a, info: dict, pasta: str, nome: str, img, mask, t, H: floa
         "fracao_glandular_final": round(float((d / a.fator_material).sum() / t.sum()), 3),
         "fracao_glandular_impressa": round(float((dq / a.fator_material).sum() / t.sum()), 3),
         "fator_escala_k": round(k, 3), "fator_material": a.fator_material,
+        "atenuacao": getattr(a, "atenuacao", None),
         "n_placas": n, "espessura_placa_mm": round(e * s, 3), "base_placa_mm": a.base_placa * s,
         "espessura_placa_modelo_mm": round(e, 3),
         "altura_pilha_mm": round(altura_pilha, 1), "pilha_cabe_no_recipiente": bool(altura_pilha <= H * s + 1e-6),
@@ -870,7 +873,9 @@ def processar(arq: str, a) -> dict:
     return info
 
 
-def main():
+def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("entradas", nargs="+", help="arquivos, pastas ou curingas")
     ap.add_argument("--modo", choices=["placas", "composto", "solido", "relevo", "volume"], default="placas")
@@ -891,9 +896,19 @@ def main():
                    help="desvio-padrão da suavização do relevo, em mm (padrão 0.75; menor = mais detalhe e mais ruído)")
     g.add_argument("--limiar-fibroso", dest="limiar_fibroso", type=float, default=1.0,
                    help="ajusta o corte gordura×fibroso: <1 inclui feixes mais tênues, >1 só o mais denso")
-    g.add_argument("--fator-material", dest="fator_material", type=float, default=1.0,
+    g.add_argument("--fator-material", dest="fator_material", type=float, default=None,
                    help="mm de placa por mm de tecido glandular: (μ_glandular − μ_gordura)/(μ_placa − μ_parafina). "
-                        "Padrão 1 (não calibrado); ver docs/CALIBRACAO_RADIOGRAFICA.md")
+                        "Se omitido: calculado pela atenuação linear (--energia-kev), ou 1 se nenhum dos dois for dado")
+    g.add_argument("--energia-kev", dest="energia_kev", type=float, default=None,
+                   help="energia efetiva do feixe em keV: calcula o fator de material pela atenuação linear (src/atenuacao.py)")
+    g.add_argument("--material-placa", dest="material_placa", choices=["PLA", "PETG", "ABS"], default="PLA",
+                   help="material do filamento (usado com --energia-kev)")
+    g.add_argument("--dens-placa", dest="dens_placa", type=float, default=None,
+                   help="densidade real da placa impressa em g/cm³ (usado com --energia-kev)")
+    g.add_argument("--material-fundo", dest="material_fundo", choices=["parafina", "cera_abelha"], default="parafina",
+                   help="material que imita a gordura ao redor das placas (usado com --energia-kev)")
+    g.add_argument("--dens-parafina", dest="dens_parafina", type=float, default=None,
+                   help="densidade da parafina em g/cm³ (padrão 0,82; usado com --energia-kev)")
     g.add_argument("--margem-pele", dest="margem_pele", type=float, default=5.0,
                    help="faixa junto à pele sem tecido denso, em mm (padrão 5)")
     g.add_argument("--traco-min", dest="traco_min", type=float, default=1.2,
@@ -925,7 +940,17 @@ def main():
     ap.add_argument("--max-faces", dest="max_faces", type=int,
                     help="reduz a malha para no máximo N faces (ex.: 20000 para editar no Fusion)")
     ap.add_argument("--saida", default="saida")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
+    a.atenuacao = None
+    if a.fator_material is None:
+        if a.energia_kev is not None:
+            from atenuacao import fator_material as _fator, relatorio as _rel
+            a.atenuacao = _fator(a.energia_kev, placa=a.material_placa, dens_placa=a.dens_placa,
+                                 dens_parafina=a.dens_parafina, fundo=a.material_fundo)
+            a.fator_material = round(a.atenuacao["fator_material"], 4)
+            print(_rel(a.atenuacao))
+        else:
+            a.fator_material = 1.0
 
     arquivos = listar_dicoms(a.entradas)
     if not arquivos:

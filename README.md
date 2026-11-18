@@ -129,7 +129,7 @@ Achados que importam aqui:
 | Parafina líquida como gordura | `recipiente.stl` e `parafina_estimada_mL` em `info.json` | |
 | Pele de 5 mm no recipiente | `--parede` (padrão 3 mm) e `--margem-pele` (padrão 5 mm) | a parede padrão é menor que a do artigo |
 | Menor detalhe confiável ~0,3 mm (SLA/PolyJet) | `--traco-min` (padrão 1,2 mm) | piso mais conservador, pensando em FDM |
-| Material do degrau e μ do material (Clark) | `--fator-material` | **ainda não calibrado** (seção 4) |
+| Material do degrau e μ do material (Clark) | `--energia-kev`, `--material-placa` (`src/atenuacao.py`) | fator **calculado pela atenuação linear** (0,387 para PLA a 20 keV); validar com degrau radiografado (seção 4) |
 | Resinas como melhor material para lesões (Bliznakova) | sem parâmetro | escolha do material é feita na impressão |
 | Quantidade de tecido glandular por voxel (TG-234, UMass) | `mapa_fibroso()` | análogo 2D |
 
@@ -172,7 +172,7 @@ quantitativo** que reproduza a mamografia.
 |---|---|---|
 | **A imagem provavelmente não é RAW.** `lcc1.tif` é um TIFF de 8 bits, sem metadados; se for "for presentation", o cinza não é proporcional à atenuação | Clark 2016: "for presentation" não é adequada | tratar como protótipo **morfológico**; para fidelidade, usar DICOM RAW |
 | **Escala desconhecida.** Pixel de 0,07 mm e espessura de 50 mm são **suposições** | TIFF não traz calibração | confirmar os dois valores antes de imprimir |
-| **μ do material não medido.** `--fator-material` está em 1,0 | Clark: degraus impressos + radiografia | imprimir um **degrau** do material escolhido e medir |
+| **μ do material só calculado.** O fator vem da atenuação linear tabelada (monoenergética, material maciço), não de medição | Clark: degraus impressos + radiografia | imprimir um **degrau** do material escolhido e medir para validar |
 | **Bolhas de ar** em PLA e PET-G; padrão quadriculado em FDM | Bliznakova 2024; Clark 2016; TG-234 (Duke) | preferir **resina** (White v4); em FDM, 100 % de preenchimento, secar o filamento e degaseificar sob a parafina |
 | **Placas afundam e deslizam** na parafina (PLA 1,24 e ABS 1,04 contra 0,82 g/cm³) | densidades de Bliznakova; dificuldade de posicionar peças | usar o `guia_montagem_1para1.pdf`; considerar guias de registro no recipiente |
 | **Colunas não focalizadas.** As placas empilham na vertical, sem inclinação para o foco | Clark 2016: colunas focalizadas (SOD 66 cm) | estimativa geométrica: deslocamento de até ~8 mm na borda das placas e ~2 mm na região densa central (estimativa nossa, SOD 660 mm). Correção possível: encolher cada placa no plano em `(1 − h/SOD)` |
@@ -225,7 +225,7 @@ conversão, não a fidelidade física.
 ## 7. Estrutura do repositório
 
 ```
-src/          mama3d.py (pipeline) · dicom_io.py (leitura) · comparar.py + comparar_imagej.ijm · perdas.py · inspecionar.py
+src/          mama3d.py (pipeline) · atenuacao.py (μ e fator de material) · dicom_io.py (leitura) · comparar.py + comparar_imagej.ijm · perdas.py · inspecionar.py
 tests/        geradores de imagens sintéticas e scripts de validação do mammoreplicator
 docs/USO.md   comandos, parâmetros e modos
 externo/      código de terceiros (não versionado): veja externo/LEIAME.md

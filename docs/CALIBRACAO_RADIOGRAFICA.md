@@ -5,10 +5,39 @@
 O gerador decide **quantos milímetros de plástico** colocar em cada ponto para que a
 peça "escureça" a radiografia como o tecido fibroglandular faria. Essa conta depende de
 quanto o **plástico, do jeito que a sua impressora o deposita**, atenua o feixe de raios X
-em comparação com o tecido. Hoje o parâmetro `--fator-material` vale 1,0, ou seja, o código
-**assume** que 1 mm de plástico equivale a 1 mm de tecido. Isso provavelmente está errado.
+em comparação com o tecido.
 
-Radiografar o material é a forma de **medir** esse fator, em vez de supô-lo.
+**Atualização (orientação da pesquisa):** o fator passa a ser **calculado pela atenuação linear**
+(seção 1b). Antes disso, `--fator-material` valia 1,0, ou seja, o código assumia que 1 mm de
+plástico equivale a 1 mm de tecido, o que era errado. A radiografia continua necessária, mas
+como **validação** do cálculo (e para capturar o que a tabela não vê: vazios, endurecimento do
+feixe, densidade real da peça impressa).
+
+## 1b. Cálculo pela atenuação linear
+
+```
+μ (cm⁻¹) = ρ (g/cm³) · (μ/ρ) (cm²/g)            (μ/ρ de mistura = Σ w_i · (μ/ρ)_i)
+
+fator_material = (μ_glandular − μ_gordura) / (μ_placa − μ_parafina)      [mm de placa por mm de tecido]
+```
+
+Implementado em `src/atenuacao.py`; no gerador: `--energia-kev 20 --material-placa PLA`.
+Os μ/ρ vêm da base Elam (pacote `xraydb`) combinada por frações de massa, e o código foi
+conferido contra a tabela NIST XCOM/ICRU-44 (tecido adiposo e mama, 15–40 keV): erro ≤ 0,03 %
+(`tests/testar_atenuacao.py`). Composições: ICRU-44 (NIST) para gordura e tecido mamário;
+PLA = (C₃H₄O₂)ₙ, 1,24 g/cm³; parafina = C₂₅H₅₂, 0,82 g/cm³.
+
+| Energia | Δμ tecido (cm⁻¹) | Δμ placa PLA (cm⁻¹) | fator |
+|---|---|---|---|
+| 20 keV | 0,163 | 0,423 | **0,387** |
+
+O fator varre de ~0,40 (16 keV) a ~0,31 (34 keV) para PLA (`python src/atenuacao.py --varredura 16 34`).
+Consequência prática: a espessura máxima de placa para 50 mm de mama cai de 50 para ~19 mm.
+
+**Limites do cálculo:** é monoenergético (use a energia efetiva do seu espectro); a composição do
+"fibroglandular" é a do ICRU-44 (outros autores usam 100 % glandular com composição diferente); PETG e
+ABS são aproximados pela unidade de repetição; e a densidade usada é a do material maciço, então
+vazios de impressão reduzem μ e exigem informar `--dens-placa`.
 
 ## 2. Por que tabelas não bastam
 
@@ -41,9 +70,8 @@ Duas consequências:
    quanto ela atenua **a mais** que a parafina que ela substitui.
 2. Como a diferença entre plástico e parafina é, em geral, bem maior que a diferença entre
    glândula e gordura, o fator tende a ser **menor que 1** (placas mais finas que as atuais).
-   Ordem de grandeza, com valores tabelados lembrados de memória e **não conferidos**:
-   Δμ do tecido ≈ 0,3 cm⁻¹ e Δμ da placa ≈ 0,6 cm⁻¹, o que daria um fator perto de 0,5.
-   Só a medição confirma.
+   Calculado (seção 1b, 20 keV, PLA): Δμ do tecido = 0,163 cm⁻¹ e Δμ da placa = 0,423 cm⁻¹,
+   fator 0,387. Só a medição confirma o valor para o filamento e a energia reais.
 
 ## 4. Procedimento
 
@@ -84,7 +112,7 @@ Duas consequências:
 | 2 | 6,4 | 622 | 0,74 cm⁻¹ |
 | 3 | 9,6 | 490 | 0,74 cm⁻¹ |
 
-Com Δμ do tecido de 0,34 cm⁻¹ (suposto), o fator seria 0,34 / 0,74 ≈ **0,46**: 1 mm de
+Exemplo ilustrativo (números de tabela de medição, não nossos): com Δμ do tecido de 0,34 cm⁻¹ (suposto), o fator seria 0,34 / 0,74 ≈ **0,46**: 1 mm de
 tecido glandular a mais que a gordura equivale a 0,46 mm de placa.
 
 ## 5. O que a medição também revela

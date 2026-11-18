@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 
 import numpy as np
 import trimesh
@@ -109,4 +110,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     main()

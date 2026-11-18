@@ -38,6 +38,20 @@ Saída em `saida/<nome>/`: `impressao.stl` (pronto para o fatiador), `modelo.glb
 `visualizar.html` (abrir no navegador, precisa de internet para o three.js),
 `painel.png` (etapas 2D) e `info.json`.
 
+## Fator de material por atenuação linear
+
+O fator `mm de placa por mm de tecido` é calculado por `(μ_gland − μ_gordura)/(μ_placa − μ_parafina)`
+(ver `docs/CALIBRACAO_RADIOGRAFICA.md`, seção 1b):
+
+```powershell
+python src\atenuacao.py --energia 20 --placa PLA            # um ponto
+python src\atenuacao.py --varredura 15 40 --png saida\fator.png
+python src\mama3d.py dados\rcc2.tif --pixel-mm 0.1167 --energia-kev 20 --material-placa PLA --espessura-placa 2.0
+```
+
+Com fator ~0,39 a espessura total de placa cai (50 mm de mama → ~19 mm), então use placas mais
+finas (ex.: 2,0 mm → 9 placas em vez de 13) para manter níveis de cinza suficientes.
+
 ## Modo placas (padrão): só o tecido fibroglandular
 Segue Bliznakova et al., *Front. Phys.* 12:1441740 (2024): imprime-se apenas o tecido
 denso (PLA ou resina, 100 % de infill). O tecido adiposo é parafina líquida dentro de

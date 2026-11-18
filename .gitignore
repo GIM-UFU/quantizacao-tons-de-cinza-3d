@@ -19,3 +19,13 @@ externo/*
 # temporários
 tmp_*/
 *.log
+
+
+# comandos pessoais (nao versionar)
+comandos/
+
+# material para reunioes (contem imagens de exames)
+mostrar_ana/
+
+# pacote de reuniao (mesmo conteudo de mostrar_ana/, com imagens de exames)
+mostrar_ana.rar

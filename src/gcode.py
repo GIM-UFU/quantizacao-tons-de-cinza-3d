@@ -24,6 +24,7 @@ import argparse
 import io
 import math
 import os
+import sys
 
 import numpy as np
 import trimesh
@@ -291,4 +292,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     main()
